@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>ShipChat</title>
-<script src="gun.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -335,66 +334,6 @@ body {
   -webkit-appearance: none;
 }
 
-#qr-screen {
-  display: none;
-  width: 100%;
-  max-width: 380px;
-  padding: 30px 20px;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  min-height: 100vh;
-  justify-content: center;
-}
-
-.qr-title {
-  font-family: Courier, monospace;
-  font-size: 16px;
-  color: #00d4ff;
-  letter-spacing: 3px;
-}
-
-.qr-box {
-  background: #ffffff;
-  padding: 14px;
-  border-radius: 12px;
-}
-
-.qr-hint {
-  font-family: Courier, monospace;
-  font-size: 11px;
-  color: #4a6080;
-  text-align: center;
-  letter-spacing: 1px;
-  line-height: 2;
-}
-
-.qr-url {
-  font-family: Courier, monospace;
-  font-size: 11px;
-  color: #00d4ff;
-  text-align: center;
-  word-break: break-all;
-  background: #111827;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid #1e3a5f;
-  width: 100%;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 1px solid #1e3a5f;
-  border-radius: 8px;
-  color: #4a6080;
-  font-family: Courier, monospace;
-  font-size: 12px;
-  padding: 10px 28px;
-  cursor: pointer;
-  letter-spacing: 1px;
-  -webkit-appearance: none;
-}
-
 .hidden { display: none !important; }
 </style>
 </head>
@@ -452,7 +391,6 @@ body {
     </div>
     <div class="user-badge">AS <span id="current-user-label"></span></div>
     <div class="header-btns">
-      <button class="icon-btn" onclick="showQR()">QR</button>
       <button class="icon-btn" onclick="doLogout()">OUT</button>
     </div>
   </div>
@@ -469,37 +407,33 @@ body {
   </div>
 </div>
 
-<!-- QR -->
-<div id="qr-screen">
-  <div class="qr-title">&#128247; SHARE SHIPCHAT</div>
-  <div class="qr-box">
-    <img id="qr-img" src="" alt="QR Code" width="200" height="200">
-  </div>
-  <div class="qr-hint">
-    Crew scans this with phone camera<br>
-    to open ShipChat instantly<br>
-    Must be on WiFi-Staff-Ovation
-  </div>
-  <div class="qr-url" id="qr-url-text"></div>
-  <button class="btn-secondary" onclick="backToChat()">&#8592; BACK TO CHAT</button>
-</div>
-
 <script>
-  // ── USERS saved in localStorage - NO INTERNET NEEDED ──
-  function getUsers() {
-    try { return JSON.parse(localStorage.getItem('sc_users') || '{}'); } catch(e) { return {}; }
-  }
-
-  function saveUsers(users) {
-    localStorage.setItem('sc_users', JSON.stringify(users));
-  }
-
-  // ── GUN for messages only - syncs between devices on same WiFi ──
-  var gun = Gun({ localStorage: true });
-  var messages = gun.get('shipchat-offline-msgs');
+  // ── STORAGE ──
+  // Users stored in localStorage
+  // Messages stored in localStorage and synced via polling
+  var USERS_KEY = 'sc_users';
+  var MSGS_KEY = 'sc_messages';
   var currentUser = null;
-  var renderedKeys = {};
+  var lastMsgCount = 0;
+  var pollInterval = null;
 
+  function getUsers() {
+    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch(e) { return {}; }
+  }
+
+  function saveUsers(u) {
+    localStorage.setItem(USERS_KEY, JSON.stringify(u));
+  }
+
+  function getMessages() {
+    try { return JSON.parse(localStorage.getItem(MSGS_KEY)) || []; } catch(e) { return []; }
+  }
+
+  function saveMessages(m) {
+    localStorage.setItem(MSGS_KEY, JSON.stringify(m));
+  }
+
+  // ── AUTH ──
   function switchTab(tab) {
     document.getElementById('tab-login').className = 'tab-btn' + (tab === 'login' ? ' active' : '');
     document.getElementById('tab-register').className = 'tab-btn' + (tab === 'register' ? ' active' : '');
@@ -544,7 +478,7 @@ body {
 
   function doLogout() {
     currentUser = null;
-    renderedKeys = {};
+    if (pollInterval) clearInterval(pollInterval);
     sessionStorage.removeItem('sc_user');
     document.getElementById('messages-wrap').innerHTML =
       '<div class="empty-state" id="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
@@ -557,63 +491,50 @@ body {
 
   function enterChat() {
     document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('qr-screen').style.display = 'none';
     document.getElementById('chat-screen').style.display = 'flex';
     document.getElementById('current-user-label').textContent = currentUser.toUpperCase();
-    listenMessages();
+    loadAllMessages();
+    // Poll every 2 seconds for new messages
+    pollInterval = setInterval(loadAllMessages, 2000);
     setTimeout(function() { document.getElementById('msg-input').focus(); }, 300);
   }
 
+  // ── MESSAGES ──
   function sendMessage() {
     var input = document.getElementById('msg-input');
     var text = input.value.trim();
     if (!text || !currentUser) return;
-    var key = Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-    messages.get(key).put({ user: currentUser, text: text, time: Date.now() });
+    var msgs = getMessages();
+    msgs.push({ user: currentUser, text: text, time: Date.now() });
+    saveMessages(msgs);
     input.value = '';
     input.focus();
+    loadAllMessages();
   }
 
-  function listenMessages() {
-    messages.map().on(function(data, key) {
-      if (!data || !data.text || renderedKeys[key]) return;
-      renderedKeys[key] = true;
-      var empty = document.getElementById('empty-state');
-      if (empty) empty.remove();
-      var wrap = document.getElementById('messages-wrap');
+  function loadAllMessages() {
+    var msgs = getMessages();
+    if (msgs.length === lastMsgCount) return;
+    lastMsgCount = msgs.length;
+    var wrap = document.getElementById('messages-wrap');
+    wrap.innerHTML = '';
+    if (msgs.length === 0) {
+      wrap.innerHTML = '<div class="empty-state" id="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
+      return;
+    }
+    msgs.sort(function(a, b) { return a.time - b.time; });
+    msgs.forEach(function(data) {
       var isMine = data.user === currentUser;
       var t = new Date(data.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       var div = document.createElement('div');
       div.className = 'msg-item ' + (isMine ? 'mine' : 'theirs');
-      div.setAttribute('data-time', data.time);
       div.innerHTML =
         '<div class="msg-sender">' + esc(data.user) + '</div>' +
         '<div class="msg-bubble">' + esc(data.text) + '</div>' +
         '<div class="msg-time">' + t + '</div>';
-      var items = wrap.querySelectorAll('.msg-item');
-      var ins = false;
-      for (var i = 0; i < items.length; i++) {
-        if (Number(items[i].getAttribute('data-time')) > data.time) {
-          wrap.insertBefore(div, items[i]); ins = true; break;
-        }
-      }
-      if (!ins) wrap.appendChild(div);
-      wrap.scrollTop = wrap.scrollHeight;
+      wrap.appendChild(div);
     });
-  }
-
-  function showQR() {
-    var url = 'http://172.28.138.116:8080/shipchat.html';
-    document.getElementById('qr-url-text').textContent = url;
-    document.getElementById('qr-img').src =
-      'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url);
-    document.getElementById('chat-screen').style.display = 'none';
-    document.getElementById('qr-screen').style.display = 'flex';
-  }
-
-  function backToChat() {
-    document.getElementById('qr-screen').style.display = 'none';
-    document.getElementById('chat-screen').style.display = 'flex';
+    wrap.scrollTop = wrap.scrollHeight;
   }
 
   function esc(s) {
