@@ -408,28 +408,13 @@ body {
 </div>
 
 <script>
-  var USERS_KEY = 'sc_users';
-  var MSGS_KEY = 'sc_messages';
+  // Server IP - your iPhone
+  var SERVER = 'http://172.28.138.116:8080';
   var currentUser = null;
   var pollInterval = null;
-  var lastRenderedCount = -1; // -1 forces first render always
+  var lastMsgCount = -1;
 
-  function getUsers() {
-    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch(e) { return {}; }
-  }
-
-  function saveUsers(u) {
-    localStorage.setItem(USERS_KEY, JSON.stringify(u));
-  }
-
-  function getMessages() {
-    try { return JSON.parse(localStorage.getItem(MSGS_KEY)) || []; } catch(e) { return []; }
-  }
-
-  function saveMessages(m) {
-    localStorage.setItem(MSGS_KEY, JSON.stringify(m));
-  }
-
+  // ── AUTH ──
   function switchTab(tab) {
     document.getElementById('tab-login').className = 'tab-btn' + (tab === 'login' ? ' active' : '');
     document.getElementById('tab-register').className = 'tab-btn' + (tab === 'register' ? ' active' : '');
@@ -452,33 +437,46 @@ body {
     if (u.length < 3) return setMsg('Username min 3 chars.', 'error');
     if (p.length < 4) return setMsg('Password min 4 chars.', 'error');
     if (p !== p2) return setMsg('Passwords do not match.', 'error');
-    var users = getUsers();
-    if (users[u]) return setMsg('Username already taken.', 'error');
-    users[u] = { username: u, password: p, joined: Date.now() };
-    saveUsers(users);
-    setMsg('Account created! You can now login.', 'success');
-    setTimeout(function() { switchTab('login'); }, 1200);
+    fetch(SERVER + '/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    }).then(function(r) {
+      if (r.status === 409) {
+        setMsg('Username already taken.', 'error');
+      } else {
+        setMsg('Account created! You can now login.', 'success');
+        setTimeout(function() { switchTab('login'); }, 1200);
+      }
+    }).catch(function() {
+      setMsg('Cannot connect to server.', 'error');
+    });
   }
 
   function doLogin() {
     var u = document.getElementById('login-user').value.trim();
     var p = document.getElementById('login-pass').value;
     if (!u || !p) return setMsg('Fill in all fields.', 'error');
-    var users = getUsers();
-    if (!users[u]) return setMsg('User not found. Register first.', 'error');
-    if (users[u].password !== p) return setMsg('Wrong password.', 'error');
-    currentUser = u;
-    sessionStorage.setItem('sc_user', u);
-    enterChat();
+    fetch(SERVER + '/users').then(function(r) {
+      return r.json();
+    }).then(function(users) {
+      if (!users[u]) return setMsg('User not found. Register first.', 'error');
+      if (users[u].password !== p) return setMsg('Wrong password.', 'error');
+      currentUser = u;
+      sessionStorage.setItem('sc_user', u);
+      enterChat();
+    }).catch(function() {
+      setMsg('Cannot connect to server.', 'error');
+    });
   }
 
   function doLogout() {
     currentUser = null;
-    lastRenderedCount = -1;
+    lastMsgCount = -1;
     if (pollInterval) clearInterval(pollInterval);
     sessionStorage.removeItem('sc_user');
     document.getElementById('messages-wrap').innerHTML =
-      '<div class="empty-state" id="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
+      '<div class="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
     document.getElementById('chat-screen').style.display = 'none';
     document.getElementById('auth-screen').style.display = 'flex';
     document.getElementById('login-user').value = '';
@@ -490,36 +488,47 @@ body {
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('chat-screen').style.display = 'flex';
     document.getElementById('current-user-label').textContent = currentUser.toUpperCase();
-    lastRenderedCount = -1; // force reload on login
-    renderMessages();
+    lastMsgCount = -1;
+    fetchMessages();
     if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(renderMessages, 2000);
+    pollInterval = setInterval(fetchMessages, 2000);
     setTimeout(function() { document.getElementById('msg-input').focus(); }, 300);
   }
 
+  // ── MESSAGES ──
   function sendMessage() {
     var input = document.getElementById('msg-input');
     var text = input.value.trim();
     if (!text || !currentUser) return;
-    var msgs = getMessages();
-    msgs.push({ user: currentUser, text: text, time: Date.now() });
-    saveMessages(msgs);
+    var msg = { user: currentUser, text: text, time: Date.now() };
     input.value = '';
+    fetch(SERVER + '/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(msg)
+    }).then(function() {
+      lastMsgCount = -1;
+      fetchMessages();
+    });
     input.focus();
-    lastRenderedCount = -1; // force re-render
-    renderMessages();
   }
 
-  function renderMessages() {
-    var msgs = getMessages();
-    // Always render if lastRenderedCount is -1 (forced)
-    // or if message count changed
-    if (lastRenderedCount !== -1 && msgs.length === lastRenderedCount) return;
-    lastRenderedCount = msgs.length;
+  function fetchMessages() {
+    fetch(SERVER + '/messages')
+      .then(function(r) { return r.json(); })
+      .then(function(msgs) {
+        if (msgs.length === lastMsgCount) return;
+        lastMsgCount = msgs.length;
+        renderMessages(msgs);
+      })
+      .catch(function() {});
+  }
+
+  function renderMessages(msgs) {
     var wrap = document.getElementById('messages-wrap');
     var atBottom = wrap.scrollHeight - wrap.scrollTop <= wrap.clientHeight + 50;
     wrap.innerHTML = '';
-    if (msgs.length === 0) {
+    if (!msgs || msgs.length === 0) {
       wrap.innerHTML = '<div class="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
       return;
     }
