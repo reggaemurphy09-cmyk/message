@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>ShipChat</title>
-<!-- Gun.js loads from your iPhone - no internet needed! -->
 <script src="gun.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -336,7 +335,6 @@ body {
   -webkit-appearance: none;
 }
 
-/* QR */
 #qr-screen {
   display: none;
   width: 100%;
@@ -487,15 +485,18 @@ body {
 </div>
 
 <script>
-  // Gun.js loaded locally from iPhone - no internet needed!
-  // Points to your iPhone as the relay server
-  var gun = Gun({
-    peers: ['http://172.28.138.116:8080/gun'],
-    localStorage: true
-  });
+  // ── USERS saved in localStorage - NO INTERNET NEEDED ──
+  function getUsers() {
+    try { return JSON.parse(localStorage.getItem('sc_users') || '{}'); } catch(e) { return {}; }
+  }
 
-  var messages = gun.get('shipchat-local-msgs');
-  var users = gun.get('shipchat-local-users');
+  function saveUsers(users) {
+    localStorage.setItem('sc_users', JSON.stringify(users));
+  }
+
+  // ── GUN for messages only - syncs between devices on same WiFi ──
+  var gun = Gun({ localStorage: true });
+  var messages = gun.get('shipchat-offline-msgs');
   var currentUser = null;
   var renderedKeys = {};
 
@@ -521,32 +522,24 @@ body {
     if (u.length < 3) return setMsg('Username min 3 chars.', 'error');
     if (p.length < 4) return setMsg('Password min 4 chars.', 'error');
     if (p !== p2) return setMsg('Passwords do not match.', 'error');
-    users.get(u).once(function(data) {
-      if (data && data.password) {
-        setMsg('Username already taken.', 'error');
-      } else {
-        users.get(u).put({ username: u, password: p, joined: Date.now() });
-        setMsg('Account created! You can now login.', 'success');
-        setTimeout(function() { switchTab('login'); }, 1200);
-      }
-    });
+    var users = getUsers();
+    if (users[u]) return setMsg('Username already taken.', 'error');
+    users[u] = { username: u, password: p, joined: Date.now() };
+    saveUsers(users);
+    setMsg('Account created! You can now login.', 'success');
+    setTimeout(function() { switchTab('login'); }, 1200);
   }
 
   function doLogin() {
     var u = document.getElementById('login-user').value.trim();
     var p = document.getElementById('login-pass').value;
     if (!u || !p) return setMsg('Fill in all fields.', 'error');
-    users.get(u).once(function(data) {
-      if (!data || !data.password) {
-        setMsg('User not found. Register first.', 'error');
-      } else if (data.password !== p) {
-        setMsg('Wrong password.', 'error');
-      } else {
-        currentUser = u;
-        sessionStorage.setItem('sc_user', u);
-        enterChat();
-      }
-    });
+    var users = getUsers();
+    if (!users[u]) return setMsg('User not found. Register first.', 'error');
+    if (users[u].password !== p) return setMsg('Wrong password.', 'error');
+    currentUser = u;
+    sessionStorage.setItem('sc_user', u);
+    enterChat();
   }
 
   function doLogout() {
