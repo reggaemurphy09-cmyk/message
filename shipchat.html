@@ -408,14 +408,11 @@ body {
 </div>
 
 <script>
-  // ── STORAGE ──
-  // Users stored in localStorage
-  // Messages stored in localStorage and synced via polling
   var USERS_KEY = 'sc_users';
   var MSGS_KEY = 'sc_messages';
   var currentUser = null;
-  var lastMsgCount = 0;
   var pollInterval = null;
+  var lastRenderedCount = -1; // -1 forces first render always
 
   function getUsers() {
     try { return JSON.parse(localStorage.getItem(USERS_KEY)) || {}; } catch(e) { return {}; }
@@ -433,7 +430,6 @@ body {
     localStorage.setItem(MSGS_KEY, JSON.stringify(m));
   }
 
-  // ── AUTH ──
   function switchTab(tab) {
     document.getElementById('tab-login').className = 'tab-btn' + (tab === 'login' ? ' active' : '');
     document.getElementById('tab-register').className = 'tab-btn' + (tab === 'register' ? ' active' : '');
@@ -478,6 +474,7 @@ body {
 
   function doLogout() {
     currentUser = null;
+    lastRenderedCount = -1;
     if (pollInterval) clearInterval(pollInterval);
     sessionStorage.removeItem('sc_user');
     document.getElementById('messages-wrap').innerHTML =
@@ -493,13 +490,13 @@ body {
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('chat-screen').style.display = 'flex';
     document.getElementById('current-user-label').textContent = currentUser.toUpperCase();
-    loadAllMessages();
-    // Poll every 2 seconds for new messages
-    pollInterval = setInterval(loadAllMessages, 2000);
+    lastRenderedCount = -1; // force reload on login
+    renderMessages();
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(renderMessages, 2000);
     setTimeout(function() { document.getElementById('msg-input').focus(); }, 300);
   }
 
-  // ── MESSAGES ──
   function sendMessage() {
     var input = document.getElementById('msg-input');
     var text = input.value.trim();
@@ -509,17 +506,21 @@ body {
     saveMessages(msgs);
     input.value = '';
     input.focus();
-    loadAllMessages();
+    lastRenderedCount = -1; // force re-render
+    renderMessages();
   }
 
-  function loadAllMessages() {
+  function renderMessages() {
     var msgs = getMessages();
-    if (msgs.length === lastMsgCount) return;
-    lastMsgCount = msgs.length;
+    // Always render if lastRenderedCount is -1 (forced)
+    // or if message count changed
+    if (lastRenderedCount !== -1 && msgs.length === lastRenderedCount) return;
+    lastRenderedCount = msgs.length;
     var wrap = document.getElementById('messages-wrap');
+    var atBottom = wrap.scrollHeight - wrap.scrollTop <= wrap.clientHeight + 50;
     wrap.innerHTML = '';
     if (msgs.length === 0) {
-      wrap.innerHTML = '<div class="empty-state" id="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
+      wrap.innerHTML = '<div class="empty-state"><span class="icon">&#128225;</span><span>No messages yet.<br>Say something!</span></div>';
       return;
     }
     msgs.sort(function(a, b) { return a.time - b.time; });
@@ -534,7 +535,7 @@ body {
         '<div class="msg-time">' + t + '</div>';
       wrap.appendChild(div);
     });
-    wrap.scrollTop = wrap.scrollHeight;
+    if (atBottom) wrap.scrollTop = wrap.scrollHeight;
   }
 
   function esc(s) {
