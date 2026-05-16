@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>ShipChat</title>
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<!-- Gun.js loads from your iPhone - no internet needed! -->
+<script src="gun.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -175,11 +176,6 @@ body {
   animation: blink 2s infinite;
 }
 
-.status-dot.offline {
-  background: #ff4466;
-  box-shadow: 0 0 6px #ff4466;
-}
-
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
@@ -227,10 +223,9 @@ body {
   text-align: center;
   letter-spacing: 1px;
   flex-shrink: 0;
+  background: rgba(0,255,136,0.08);
+  color: #00ff88;
 }
-
-.conn-bar.online { background: rgba(0,255,136,0.08); color: #00ff88; }
-.conn-bar.offline { background: rgba(255,68,102,0.08); color: #ff4466; }
 
 .messages-wrap {
   flex: 1;
@@ -454,7 +449,7 @@ body {
 <div id="chat-screen">
   <div class="chat-header">
     <div class="chat-left">
-      <div class="status-dot" id="status-dot"></div>
+      <div class="status-dot"></div>
       <h2>SHIPCHAT</h2>
     </div>
     <div class="user-badge">AS <span id="current-user-label"></span></div>
@@ -463,7 +458,7 @@ body {
       <button class="icon-btn" onclick="doLogout()">OUT</button>
     </div>
   </div>
-  <div class="conn-bar" id="conn-bar"></div>
+  <div class="conn-bar">&#9679; SHIP WIFI &middot; NO INTERNET NEEDED</div>
   <div class="messages-wrap" id="messages-wrap">
     <div class="empty-state" id="empty-state">
       <span class="icon">&#128225;</span>
@@ -485,42 +480,24 @@ body {
   <div class="qr-hint">
     Crew scans this with phone camera<br>
     to open ShipChat instantly<br>
-    No app install needed
+    Must be on WiFi-Staff-Ovation
   </div>
   <div class="qr-url" id="qr-url-text"></div>
   <button class="btn-secondary" onclick="backToChat()">&#8592; BACK TO CHAT</button>
 </div>
 
 <script>
-  // YOUR OWN RAILWAY GUN RELAY SERVER
-  var RELAY = 'https://attractive-eagerness-production-7e46.up.railway.app/gun';
-
+  // Gun.js loaded locally from iPhone - no internet needed!
+  // Points to your iPhone as the relay server
   var gun = Gun({
-    peers: [RELAY],
+    peers: ['http://172.28.138.116:8080/gun'],
     localStorage: true
   });
 
-  var messages = gun.get('shipchat-crew-final-msgs');
-  var users = gun.get('shipchat-crew-final-users');
+  var messages = gun.get('shipchat-local-msgs');
+  var users = gun.get('shipchat-local-users');
   var currentUser = null;
   var renderedKeys = {};
-
-  function setConn(online) {
-    var dot = document.getElementById('status-dot');
-    var bar = document.getElementById('conn-bar');
-    if (online) {
-      dot.className = 'status-dot';
-      bar.className = 'conn-bar online';
-      bar.textContent = 'ONLINE - Messages syncing to your relay server';
-    } else {
-      dot.className = 'status-dot offline';
-      bar.className = 'conn-bar offline';
-      bar.textContent = 'OFFLINE - Messages saved locally';
-    }
-  }
-
-  window.addEventListener('online', function() { setConn(true); });
-  window.addEventListener('offline', function() { setConn(false); });
 
   function switchTab(tab) {
     document.getElementById('tab-login').className = 'tab-btn' + (tab === 'login' ? ' active' : '');
@@ -590,7 +567,6 @@ body {
     document.getElementById('qr-screen').style.display = 'none';
     document.getElementById('chat-screen').style.display = 'flex';
     document.getElementById('current-user-label').textContent = currentUser.toUpperCase();
-    setConn(navigator.onLine);
     listenMessages();
     setTimeout(function() { document.getElementById('msg-input').focus(); }, 300);
   }
@@ -634,7 +610,7 @@ body {
   }
 
   function showQR() {
-    var url = window.location.href;
+    var url = 'http://172.28.138.116:8080/shipchat.html';
     document.getElementById('qr-url-text').textContent = url;
     document.getElementById('qr-img').src =
       'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url);
